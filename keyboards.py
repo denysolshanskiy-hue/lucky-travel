@@ -72,6 +72,20 @@ def tour_detail_keyboard(tour_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def admin_tour_detail_keyboard(tour_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    close_text = "🔒 Закрити тур" if is_active else "🔓 Відкрити тур"
+    close_callback = f"admin:deactivate_tour:{tour_id}" if is_active else f"admin:activate_tour:{tour_id}"
+    
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Зареєструватися", callback_data=f"book:{tour_id}")],
+            [InlineKeyboardButton(text="👥 Учасники туру", callback_data=f"tour_participants:{tour_id}")],
+            [InlineKeyboardButton(text=close_text, callback_data=close_callback)],
+            [InlineKeyboardButton(text="Назад до турів", callback_data="admin:mytours")],
+        ]
+    )
+
+
 def payment_keyboard(url: str, community_url: str | None = None) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="Оплатити через Monobank", url=url)]]
     if community_url:
