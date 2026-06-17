@@ -1,0 +1,7 @@
+aiogram==3.28.2
+aiohttp>=3.13.2,<4.0
+pydantic>=2.12.4,<3.0
+aiosqlite==0.20.0
+APScheduler==3.10.4
+python-dotenv==1.0.1
+typing-extensions>=4.15.0
