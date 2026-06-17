@@ -307,12 +307,39 @@ class Database:
             rows = await cursor.fetchall()
             return [Tour(**dict(row)) for row in rows]
 
+    async def list_inactive_tours(self) -> list[Tour]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM tours WHERE is_active = 0 ORDER BY starts_at DESC"
+            )
+            rows = await cursor.fetchall()
+            return [Tour(**dict(row)) for row in rows]
+
     async def get_tour(self, tour_id: int) -> Tour | None:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM tours WHERE id = ?", (tour_id,))
             row = await cursor.fetchone()
             return Tour(**dict(row)) if row else None
+
+    async def deactivate_tour(self, tour_id: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "UPDATE tours SET is_active = 0 WHERE id = ?",
+                (tour_id,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def activate_tour(self, tour_id: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "UPDATE tours SET is_active = 1 WHERE id = ?",
+                (tour_id,),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def create_booking(self, data: dict) -> int:
         async with aiosqlite.connect(self.path) as db:
