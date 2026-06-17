@@ -346,6 +346,7 @@ class Database:
                 SELECT b.*, t.title AS tour_title, t.starts_at AS starts_at
                 FROM bookings b
                 JOIN tours t ON t.id = b.tour_id
+                WHERE b.status IN ('pending', 'paid')
                 ORDER BY b.created_at DESC
                 LIMIT ?
                 """,
@@ -456,6 +457,7 @@ class Database:
                 """
                 SELECT *
                 FROM camping_bookings
+                WHERE status = 'booked'
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
