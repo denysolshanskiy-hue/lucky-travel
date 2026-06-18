@@ -11,7 +11,8 @@ class Tour:
     id: int
     title: str
     starts_at: str
-    price: int
+    adult_price: int
+    child_price: int
     prepay: int | None
     seats_total: int
     kind: str
@@ -86,7 +87,8 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     starts_at TEXT NOT NULL,
-                    price INTEGER NOT NULL,
+                    adult_price INTEGER NOT NULL DEFAULT 0,
+                    child_price INTEGER NOT NULL DEFAULT 0,
                     prepay INTEGER,
                     seats_total INTEGER NOT NULL DEFAULT 0,
                     kind TEXT NOT NULL,
@@ -179,8 +181,22 @@ class Database:
                 column="booking_date",
                 definition="TEXT",
             )
-            await db.commit()
 
+            await self._ensure_column(
+                db,
+            table="tours",
+            column="adult_price",
+            definition="INTEGER NOT NULL DEFAULT 0",
+            )
+
+            await self._ensure_column(
+                db,
+                table="tours",
+                column="child_price",
+                definition="INTEGER NOT NULL DEFAULT 0",
+            )           
+            await db.commit()
+            
     async def create_rental_booking(self, data: dict) -> int:
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
@@ -274,15 +290,16 @@ class Database:
             cursor = await db.execute(
                 """
                 INSERT INTO tours (
-                    title, starts_at, price, prepay, seats_total, kind, photo_file_id, included,
+                    title, starts_at, adult_price, child_price, prepay, seats_total, kind, photo_file_id, included,
                     route, payment_url, instructor_contact, car_number, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data["title"],
                     data["starts_at"],
-                    data["price"],
+                    data["adult_price"],
+                    data["child_price"],
                     data.get("prepay"),
                     data["seats_total"],
                     data["kind"],
@@ -511,7 +528,7 @@ class Database:
                     b.id AS b_id, b.tour_id, b.user_id, b.username, b.full_name,
                     b.phone, b.people_count, b.ages, b.status, b.created_at,
                     b.reminder_3d_sent, b.reminder_1d_sent,
-                    t.id AS t_id, t.title, t.starts_at, t.price, t.prepay,
+                    t.id AS t_id, t.title, t.starts_at, t.adult_price, t.child_price, t.prepay,
                     t.seats_total, t.kind,
                     t.photo_file_id, t.included, t.route, t.payment_url,
                     t.instructor_contact, t.car_number, t.is_active
@@ -544,7 +561,8 @@ class Database:
                 id=row["t_id"],
                 title=row["title"],
                 starts_at=row["starts_at"],
-                price=row["price"],
+                adult_price=row["adult_price"],
+                child_price=row["child_price"],
                 prepay=row["prepay"],
                 seats_total=row["seats_total"],
                 kind=row["kind"],
@@ -567,4 +585,3 @@ class Database:
                 (booking_id,),
             )
             await db.commit()
-

@@ -296,3 +296,34 @@ def admin_rental_booking_keyboard(
             ]
         ]
     )
+
+def admin_tours_keyboard(
+    tours: list[Tour]
+) -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{tour.title} - {tour.starts_at[:16].replace('T', ' ')}",
+                    callback_data=f"admin:tour:{tour.id}",
+                )
+            ]
+            for tour in tours
+        ]
+    )
+
+def admin_tour_detail_keyboard(
+    tour_id: int,
+) -> InlineKeyboardMarkup:
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Завершити тур",
+                    callback_data=f"admin:finish_tour:{tour_id}",
+                )
+            ]
+        ]
+    )

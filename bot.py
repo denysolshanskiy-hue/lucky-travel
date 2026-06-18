@@ -36,8 +36,10 @@ from keyboards import (
     tour_detail_keyboard,
     tours_keyboard,
     rental_keyboard,
+    admin_tours_keyboard,
+    admin_tour_detail_keyboard,
 )
-from texts import DAY_PACKING_TEXT, OVERNIGHT_PACKING_TEXT
+from texts import DAY_PACKING_TEXT, OVERNIGHT_PACKING_TEXT, TOUR_FINISHED_TEXT
 
 router = Router()
 db: Database
@@ -47,7 +49,8 @@ config: Config
 class NewTour(StatesGroup):
     title = State()
     starts_at = State()
-    price = State()
+    adult_price = State()
+    child_price = State()
     prepay = State()
     seats_total = State()
     kind = State()
@@ -155,7 +158,9 @@ def tour_text(tour: Tour) -> str:
         f"<b>{tour.title}</b>\n\n"
         f"Дата і час: {format_dt(tour.starts_at)}\n"
         f"Формат: {kind}\n"
-        f"Ціна: {tour.price} грн{prepay}{seats}\n\n"
+        f"💰 Дорослий: {tour.adult_price} грн\n"
+        f"🧒 Дитячий: {tour.child_price} грн\n"
+        f"{prepay}{seats}\n\n"
         f"<b>У ціну входить:</b>\n{tour.included}\n\n"
         f"<b>Маршрут:</b>\n{tour.route}"
     )
@@ -389,6 +394,94 @@ async def tour_participants(callback: CallbackQuery) -> None:
     )
     await callback.answer()
 
+@router.callback_query(F.data.startswith("admin:tour:"))
+async def admin_tour_selected(
+    callback: CallbackQuery,
+) -> None:
+
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Доступно тільки адміну.",
+            show_alert=True,
+        )
+        return
+
+    tour_id = int(callback.data.split(":")[2])
+
+    tour = await db.get_tour(tour_id)
+
+    if not tour:
+        await callback.answer(
+            "Тур не знайдено.",
+            show_alert=True,
+        )
+        return
+
+    text = (
+        f"<b>{tour.title}</b>\n\n"
+        f"📅 Дата: {format_dt(tour.starts_at)}\n"
+        f"💰 Дорослий: {tour.adult_price} грн\n"
+        f"🧒 Дитячий: {tour.child_price} грн\n"
+        f"👥 Місць: {tour.seats_total}"
+    )
+
+    await callback.message.answer(
+        text,
+        reply_markup=admin_tour_detail_keyboard(tour.id),
+    )
+
+    await callback.answer()
+
+@router.callback_query(
+    F.data.startswith("admin:finish_tour:")
+)
+async def finish_tour_callback(
+    callback: CallbackQuery,
+) -> None:
+
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            "Доступно тільки адміну.",
+            show_alert=True,
+        )
+        return
+
+    tour_id = int(callback.data.split(":")[2])
+
+    tour = await db.get_tour(tour_id)
+
+    if not tour:
+        await callback.answer(
+            "Тур не знайдено.",
+            show_alert=True,
+        )
+        return
+
+    await db.deactivate_tour(tour_id)
+
+    bookings = await db.list_tour_bookings(tour_id)
+
+    sent = 0
+
+    for booking in bookings:
+        try:
+            await callback.bot.send_message(
+                booking.user_id,
+                TOUR_FINISHED_TEXT,
+            )
+            sent += 1
+
+        except Exception:
+            logging.exception(
+                f"Не вдалося надіслати повідомлення користувачу {booking.user_id}"
+            )
+
+    await callback.message.answer(
+        f"✅ Тур «{tour.title}» завершено.\n"
+        f"Повідомлення надіслано: {sent} учасникам."
+    )
+
+    await callback.answer()
 
 @router.message(Command("packing_day"))
 async def packing_day(message: Message) -> None:
@@ -711,26 +804,74 @@ async def new_tour_title(message: Message, state: FSMContext) -> None:
 
 
 @router.message(NewTour.starts_at)
-async def new_tour_starts_at(message: Message, state: FSMContext) -> None:
+async def new_tour_starts_at(
+    message: Message,
+    state: FSMContext,
+) -> None:
     try:
         starts_at = parse_datetime(message.text)
+
     except ValueError:
-        await message.answer("Не вийшло розпізнати дату. Приклад: 15.07.2026 09:00")
+        await message.answer(
+            "Не вийшло розпізнати дату. Приклад: 15.07.2026 09:00"
+        )
         return
+
     await state.update_data(starts_at=starts_at)
-    await state.set_state(NewTour.price)
-    await message.answer("Введіть повну ціну туру в грн, тільки число.")
 
+    await state.set_state(NewTour.adult_price)
 
-@router.message(NewTour.price)
-async def new_tour_price(message: Message, state: FSMContext) -> None:
-    if not message.text.strip().isdigit():
-        await message.answer("Введіть тільки число, наприклад 1800.")
+    await message.answer(
+        "Введіть вартість дорослого квитка в грн (тільки число)."
+    )
+
+@router.message(NewTour.adult_price)
+async def new_tour_adult_price(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    try:
+        adult_price = int(message.text)
+
+    except ValueError:
+        await message.answer(
+            "Введіть тільки число."
+        )
         return
-    await state.update_data(price=int(message.text.strip()))
-    await state.set_state(NewTour.prepay)
-    await message.answer("Введіть суму передплати в грн або напишіть 0, якщо передплати немає.")
 
+    await state.update_data(
+        adult_price=adult_price
+    )
+
+    await state.set_state(NewTour.child_price)
+
+    await message.answer(
+        "Введіть вартість дитячого квитка в грн (тільки число)."
+    )
+
+@router.message(NewTour.child_price)
+async def new_tour_child_price(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    try:
+        child_price = int(message.text)
+
+    except ValueError:
+        await message.answer(
+            "Введіть тільки число."
+        )
+        return
+
+    await state.update_data(
+        child_price=child_price
+    )
+
+    await state.set_state(NewTour.prepay)
+
+    await message.answer(
+        "Введіть суму передоплати в грн або 0, якщо передоплати немає."
+    )
 
 @router.message(NewTour.prepay)
 async def new_tour_prepay(message: Message, state: FSMContext) -> None:
@@ -881,7 +1022,7 @@ async def booking_ages(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
 
     pay_url = tour.payment_url or config.mono_payment_url
-    amount_to_pay = tour.prepay or tour.price
+    amount_to_pay = tour.prepay or tour.adult_price
     instructor = (
         f"\nІнструктор: {tour.instructor_contact}\n"
         if tour.instructor_contact
@@ -942,15 +1083,15 @@ async def my_tours_button(message: Message, state: FSMContext) -> None:
 
 async def send_admin_tours(message: Message) -> None:
     tours = await db.list_active_tours()
+
     if not tours:
         await message.answer("Активних турів немає.")
         return
-    lines = [
-        f"#{tour.id} - {tour.title} - {format_dt(tour.starts_at)} - "
-        f"{tour.price} грн - місць: {tour.seats_total or 'не вказано'}"
-        for tour in tours
-    ]
-    await message.answer("\n".join(lines))
+
+    await message.answer(
+        "Оберіть тур:",
+        reply_markup=admin_tours_keyboard(tours),
+    )
 
 
 @router.message(Command("bookings"))
@@ -1013,10 +1154,10 @@ async def send_admin_bookings(message: Message) -> None:
             f"Сума: {row.rental_price} грн"
         )
 
-    await message.answer(
-        text,
-        reply_markup=admin_rental_booking_keyboard(row.id)
-    )
+        await message.answer(
+            text,
+            reply_markup=admin_rental_booking_keyboard(row.id)
+        )
 
 @router.message(Command("paid"))
 async def paid(message: Message, command: CommandObject) -> None:
@@ -1135,7 +1276,6 @@ async def main() -> None:
     scheduler.start()
 
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
