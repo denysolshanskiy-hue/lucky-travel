@@ -79,7 +79,7 @@ class RentalFlow(StatesGroup):
     full_name = State()
     phone = State()
 
-TENT_TOTAL = 6
+TENT_TOTAL = 7
 HAMMOCK_TOTAL = 4
 COMMUNITY_URL = "https://t.me/luckytraval"
 CAMPING_LOCATION_URL = "https://maps.app.goo.gl/ujbWhYRXWn5T3dAX7?g_st=it"
