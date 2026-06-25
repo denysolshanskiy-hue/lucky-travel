@@ -20,10 +20,6 @@ BTN_RENT = "🏄 Прокат байдарок та SUP"
 def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_TOURS)],
-        [
-            KeyboardButton(text=BTN_PACKING_DAY),
-            KeyboardButton(text=BTN_PACKING_OVERNIGHT),
-        ],
         [KeyboardButton(text=BTN_CAMPING), KeyboardButton(text=BTN_RENT)],
     ]
     if is_admin:
@@ -86,8 +82,14 @@ def admin_tour_detail_keyboard(tour_id: int, is_active: bool) -> InlineKeyboardM
     )
 
 
-def payment_keyboard(url: str, community_url: str | None = None) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="Оплатити через Monobank", url=url)]]
+def payment_keyboard(
+    url: str,
+    community_url: str | None = None,
+    include_packing: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if url:
+        rows.append([InlineKeyboardButton(text="💳 Оплатити", url=url)])
     if community_url:
         rows.append(
             [
@@ -96,9 +98,37 @@ def payment_keyboard(url: str, community_url: str | None = None) -> InlineKeyboa
                 )
             ]
         )
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
+    if include_packing:
+        rows.append(
+            [
+                InlineKeyboardButton(text=BTN_PACKING_DAY, callback_data="packing:day"),
+                InlineKeyboardButton(text=BTN_PACKING_OVERNIGHT, callback_data="packing:overnight"),
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def booking_confirmation_keyboard(
+    payment_url: str | None,
+    booking_id: int,
+    tour_id: int,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if payment_url:
+        rows.append([InlineKeyboardButton(text="💳 Оплатити", url=payment_url)])
+    rows.append(
+        [InlineKeyboardButton(text="✅ Я оплатив", callback_data=f"booking:paid:{booking_id}")]
     )
+    rows.append(
+        [InlineKeyboardButton(text="🎒 Що взяти", callback_data=f"booking:packing:{tour_id}")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="📍 Маршрут", callback_data=f"booking:route:{tour_id}")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="📞 Інструктор", callback_data=f"booking:instructor:{tour_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def camping_payment_keyboard(payment_url: str, location_url: str) -> InlineKeyboardMarkup:
