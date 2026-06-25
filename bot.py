@@ -28,6 +28,7 @@ from keyboards import (
     admin_booking_keyboard,
     admin_rental_booking_keyboard,
     admin_camping_booking_keyboard,
+    booking_confirmation_keyboard,
     camping_keyboard,
     camping_numbers_keyboard,
     camping_payment_keyboard,
@@ -521,6 +522,58 @@ async def packing_day_callback(callback: CallbackQuery) -> None:
 async def packing_overnight_callback(callback: CallbackQuery) -> None:
     await callback.message.answer(OVERNIGHT_PACKING_TEXT)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking:packing:"))
+async def booking_packing_callback(callback: CallbackQuery) -> None:
+    tour_id = int(callback.data.split(":")[2])
+    tour = await db.get_tour(tour_id)
+    if not tour:
+        await callback.answer("Тур не знайдено.", show_alert=True)
+        return
+    packing = OVERNIGHT_PACKING_TEXT if tour.kind == "overnight" else DAY_PACKING_TEXT
+    await callback.message.answer(packing)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking:route:"))
+async def booking_route_callback(callback: CallbackQuery) -> None:
+    tour_id = int(callback.data.split(":")[2])
+    tour = await db.get_tour(tour_id)
+    if not tour:
+        await callback.answer("Тур не знайдено.", show_alert=True)
+        return
+    await callback.message.answer(f"📍 Маршрут:\n{tour.route}")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking:instructor:"))
+async def booking_instructor_callback(callback: CallbackQuery) -> None:
+    tour_id = int(callback.data.split(":")[2])
+    tour = await db.get_tour(tour_id)
+    if not tour:
+        await callback.answer("Тур не знайдено.", show_alert=True)
+        return
+    if tour.instructor_contact:
+        await callback.message.answer(f"📞 Інструктор:\n{tour.instructor_contact}")
+    else:
+        await callback.message.answer("📞 Контакти інструктора не вказані.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking:paid:"))
+async def booking_paid_callback(callback: CallbackQuery) -> None:
+    booking_id = int(callback.data.split(":")[2])
+    await callback.answer("Дякуємо! Ми повідомили адміністрацію про оплату.", show_alert=True)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        "✅ Ми отримали повідомлення про оплату. Адміністратор перевірить вашу заявку і підтвердить її найближчим часом."
+    )
+    for admin_id in config.admin_ids:
+        await callback.bot.send_message(
+            admin_id,
+            f"Клієнт натиснув кнопку 'Я оплатив' для заявки #{booking_id}. Перевірте платіж.",
+        )
 
 
 @router.callback_query(F.data == "camping:refresh")
@@ -1022,29 +1075,19 @@ async def booking_ages(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
 
     pay_url = tour.payment_url or config.mono_payment_url
-    amount_to_pay = tour.prepay or tour.adult_price
-    instructor = (
-        f"\nІнструктор: {tour.instructor_contact}\n"
-        if tour.instructor_contact
-        else ""
-    )
     text = (
-        f"Заявку #{booking_id} прийнято.\n\n"
-        f"Тур: {tour.title}\n"
-        f"Дата: {format_dt(tour.starts_at)}\n"
-        f"Кількість людей: {data['people_count']}\n"
-        f"Учасники:\n{data['ages']}\n"
-        f"{instructor}\n"
-        f"Сума до оплати: {amount_to_pay} грн\n\n"
-        f"Після оплати ми підтвердимо вашу заявку тут у боті."
+        "✅ Вашу заявку успішно створено!\n\n"
+        f"📍 Тур: {tour.title}\n"
+        f"📅 Дата: {format_dt(tour.starts_at)}\n\n"
+        f"👨 Дорослий: {tour.adult_price} грн\n"
+        f"🧒 Дитячий: {tour.child_price} грн\n\n"
+        "💳 Для підтвердження участі внесіть передоплату.\n\n"
+        "Після оплати натисніть кнопку «✅ Я оплатив»."
     )
-    if pay_url:
-        await message.answer(
-            text,
-            reply_markup=payment_keyboard(pay_url, community_url=COMMUNITY_URL),
-        )
-    else:
-        await message.answer(text)
+    await message.answer(
+        text,
+        reply_markup=booking_confirmation_keyboard(pay_url, booking_id, tour.id),
+    )
 
     admin_text = booking_admin_text(booking_id, tour, data)
     for admin_id in config.admin_ids:
