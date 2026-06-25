@@ -1261,7 +1261,7 @@ async def main() -> None:
 
     global db, config
     config = load_config()
-    db = Database(config.database_path)
+    db = Database(config.supabase_url, config.supabase_key)
     await db.init()
 
     bot = Bot(
