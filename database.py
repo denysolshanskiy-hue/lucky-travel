@@ -70,6 +70,7 @@ class RentalBooking:
     phone: str
     rental_title: str
     rental_price: int
+    units: int
     status: str
     created_at: str
     booking_date: str | None = None
@@ -267,6 +268,7 @@ class Database:
             "phone": data["phone"],
             "rental_title": data["rental_title"],
             "rental_price": data["rental_price"],
+            "units": data.get("units", 1),
             "created_at": datetime.now().isoformat(timespec="seconds"),
         }).execute()
         return int(response.data[0]["id"])

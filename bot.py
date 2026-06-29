@@ -37,6 +37,7 @@ from keyboards import (
     tour_detail_keyboard,
     tours_keyboard,
     booking_count_keyboard,
+    rental_count_keyboard,
     rental_keyboard,
     admin_tours_keyboard,
     admin_tour_detail_keyboard,
@@ -81,6 +82,7 @@ class RentalFlow(StatesGroup):
     booking_date = State()
     full_name = State()
     phone = State()
+    people_count = State()
 
 TENT_TOTAL = 7
 HAMMOCK_TOTAL = 4
@@ -893,6 +895,7 @@ async def rent_select(callback: CallbackQuery, state: FSMContext):
     await state.update_data(
         rental_title=title,
         rental_price=price,
+        rental_code=code,
     )
 
     await state.set_state(RentalFlow.booking_date)
@@ -936,40 +939,19 @@ async def rental_phone(
     state: FSMContext,
     bot: Bot
 ):
+    # Save contact info and ask for units to rent
     data = await state.update_data(
         phone=message.text.strip(),
         username=message.from_user.username,
         user_id=message.from_user.id,
     )
-
-    booking_id = await db.create_rental_booking(data)
-    await state.clear()
-
-    text = (
-    f"✅ Заявку #{booking_id} прийнято\n\n"
-    f"Послуга: {data['rental_title']}\n"
-    f"Сума до оплати: {data['rental_price']} грн"
-)
-
+    rental_code = data.get("rental_code")
+    # Ask how many units to rent (default max 10)
+    await state.set_state(RentalFlow.people_count)
     await message.answer(
-        text,
-        reply_markup=payment_keyboard(
-            "https://send.monobank.ua/jar/2zFqHRhbGi"
-        )
+        "Скільки одиниць прокату ви хочете забронювати? Виберіть кнопку або введіть число.",
+        reply_markup=rental_count_keyboard(rental_code, max_units=10) if rental_code else None,
     )
-
-    admin_text = (
-        "Нова заявка на прокат\n\n"
-        f"Дата: {data['booking_date']}\n\n"
-        f"Клієнт: {data['full_name']}\n"
-        f"Телефон: {data['phone']}\n"
-        f"Telegram: @{data['username'] if data['username'] else 'немає'}\n\n"
-        f"Послуга: {data['rental_title']}\n"
-        f"Сума: {data['rental_price']} грн"
-    )
-
-    for admin_id in config.admin_ids:
-        await bot.send_message(admin_id, admin_text)
 
 @router.callback_query(
     F.data.startswith("admin:rental_paid:")
@@ -982,6 +964,79 @@ async def rental_paid(callback: CallbackQuery):
 )
 async def rental_cancel(callback: CallbackQuery):
     ...
+
+
+@router.callback_query(F.data.startswith("rental_count:"))
+async def rental_count(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    _, rental_code, count_str = callback.data.split(":")
+    count = int(count_str)
+    data = await state.get_data()
+    data.update({"units": count})
+    booking_id = await db.create_rental_booking(data)
+    await state.clear()
+
+    text = (
+        f"✅ Заявку #{booking_id} прийнято\n\n"
+        f"Послуга: {data.get('rental_title')}\n"
+        f"Кількість одиниць: {count}\n"
+        f"Сума до оплати: {data.get('rental_price')} грн"
+    )
+    await callback.message.answer(text, reply_markup=payment_keyboard(config.mono_payment_url))
+
+    admin_text = (
+        "Нова заявка на прокат\n\n"
+        f"Дата: {data.get('booking_date')}\n\n"
+        f"Клієнт: {data.get('full_name')}\n"
+        f"Телефон: {data.get('phone')}\n"
+        f"Telegram: @{data.get('username') if data.get('username') else 'немає'}\n\n"
+        f"Послуга: {data.get('rental_title')}\n"
+        f"Кількість: {count}\n"
+        f"Сума: {data.get('rental_price')} грн"
+    )
+    for admin_id in config.admin_ids:
+        await bot.send_message(admin_id, admin_text)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("rental_count_custom:"))
+async def rental_count_custom(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(RentalFlow.people_count)
+    await callback.message.answer(
+        "Введіть потрібну кількість одиниць числом."
+    )
+    await callback.answer()
+
+
+@router.message(RentalFlow.people_count)
+async def rental_people_count(message: Message, state: FSMContext, bot: Bot) -> None:
+    if not message.text.strip().isdigit() or int(message.text.strip()) < 1:
+        await message.answer("Введіть число більше 0.")
+        return
+    count = int(message.text.strip())
+    data = await state.update_data(units=count)
+    booking_id = await db.create_rental_booking(data)
+    await state.clear()
+
+    text = (
+        f"✅ Заявку #{booking_id} прийнято\n\n"
+        f"Послуга: {data.get('rental_title')}\n"
+        f"Кількість одиниць: {count}\n"
+        f"Сума до оплати: {data.get('rental_price')} грн"
+    )
+    await message.answer(text, reply_markup=payment_keyboard(config.mono_payment_url))
+
+    admin_text = (
+        "Нова заявка на прокат\n\n"
+        f"Дата: {data.get('booking_date')}\n\n"
+        f"Клієнт: {data.get('full_name')}\n"
+        f"Телефон: {data.get('phone')}\n"
+        f"Telegram: @{data.get('username') if data.get('username') else 'немає'}\n\n"
+        f"Послуга: {data.get('rental_title')}\n"
+        f"Кількість: {count}\n"
+        f"Сума: {data.get('rental_price')} грн"
+    )
+    for admin_id in config.admin_ids:
+        await bot.send_message(admin_id, admin_text)
 
 @router.message(Command("newtour"))
 async def new_tour(message: Message, state: FSMContext) -> None:
