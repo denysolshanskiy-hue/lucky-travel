@@ -638,8 +638,9 @@ async def camping_clear_selection(callback: CallbackQuery, state: FSMContext) ->
 @router.callback_query(F.data.startswith("camping:"))
 async def camping_select(callback: CallbackQuery, state: FSMContext) -> None:
     option_code = callback.data.split(":")[1]
-    if option_code == "refresh":
-        await send_camping(callback.message)
+    if option_code in {"refresh", "confirm", "clear"}:
+        if option_code == "refresh":
+            await send_camping(callback.message)
         await callback.answer()
         return
 
@@ -767,33 +768,41 @@ async def camping_phone(message: Message, state: FSMContext, bot: Bot) -> None:
         return
 
     booking_ids: list[int] = []
-    for item in selected_items:
-        booking_date = data.get("booking_date")
-        if not booking_date:
-            continue
-        free_numbers = await camping_free_numbers(item["item_type"], booking_date)
-        if item["item_number"] not in free_numbers:
-            await state.clear()
-            await message.answer(
-                f"На жаль, номер №{item['item_number']} вже заброньовано на обрану дату."
-            )
-            await send_camping(message)
-            return
+    try:
+        for item in selected_items:
+            booking_date = data.get("booking_date")
+            if not booking_date:
+                continue
+            free_numbers = await camping_free_numbers(item["item_type"], booking_date)
+            if item["item_number"] not in free_numbers:
+                await state.clear()
+                await message.answer(
+                    f"На жаль, номер №{item['item_number']} вже заброньовано на обрану дату."
+                )
+                await send_camping(message)
+                return
 
-        booking_payload = {
-            "user_id": data.get("user_id"),
-            "username": data.get("username"),
-            "full_name": data.get("full_name"),
-            "phone": data.get("phone"),
-            "option_code": item["option_code"],
-            "option_title": item["option_title"],
-            "item_type": item["item_type"],
-            "item_number": item["item_number"],
-            "units": item["units"],
-            "booking_date": booking_date,
-        }
-        booking_id = await db.create_camping_booking(booking_payload)
-        booking_ids.append(booking_id)
+            booking_payload = {
+                "user_id": data.get("user_id"),
+                "username": data.get("username"),
+                "full_name": data.get("full_name"),
+                "phone": data.get("phone"),
+                "option_code": item["option_code"],
+                "option_title": item["option_title"],
+                "item_type": item["item_type"],
+                "item_number": item["item_number"],
+                "units": item["units"],
+                "booking_date": booking_date,
+            }
+            booking_id = await db.create_camping_booking(booking_payload)
+            booking_ids.append(booking_id)
+    except Exception as exc:
+        logging.exception("Camping booking failed")
+        await state.clear()
+        await message.answer(
+            "Під час створення броні сталася помилка. Спробуйте ще раз або зв'яжіться з адміністратором."
+        )
+        return
 
     await state.clear()
     selected_text = ", ".join(f"№{item['item_number']}" for item in selected_items)
