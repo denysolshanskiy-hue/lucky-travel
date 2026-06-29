@@ -180,6 +180,27 @@ class Database:
         ).eq("id", booking_id).execute()
         return len(response.data) > 0
 
+    async def tour_booked_seats(self, tour_id: int) -> int:
+        response = self.client.table("bookings").select(
+            "people_count"
+        ).eq("tour_id", tour_id).in_(
+            "status", ["pending", "paid"]
+        ).execute()
+        total = 0
+        for row in response.data:
+            try:
+                total += int(row.get("people_count", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+        return total
+
+    async def tour_free_seats(self, tour_id: int) -> int:
+        tour = await self.get_tour(tour_id)
+        if not tour or not tour.seats_total:
+            return 0
+        used = await self.tour_booked_seats(tour_id)
+        return max(tour.seats_total - used, 0)
+
     async def camping_used_units(self, booking_date: str | None = None) -> dict[str, int]:
         query = self.client.table("camping_bookings").select(
             "item_type, units"

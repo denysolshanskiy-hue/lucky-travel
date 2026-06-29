@@ -36,6 +36,7 @@ from keyboards import (
     payment_keyboard,
     tour_detail_keyboard,
     tours_keyboard,
+    booking_count_keyboard,
     rental_keyboard,
     admin_tours_keyboard,
     admin_tour_detail_keyboard,
@@ -152,9 +153,10 @@ def format_dt(value: str) -> str:
     return datetime.fromisoformat(value).strftime("%d.%m.%Y о %H:%M")
 
 
-def tour_text(tour: Tour) -> str:
+def tour_text(tour: Tour, free_seats: int | None = None) -> str:
     prepay = f"\nПередплата: {tour.prepay} грн" if tour.prepay else ""
     seats = f"\nКількість місць: {tour.seats_total}" if tour.seats_total else ""
+    free_text = f"\nВільно місць: {free_seats}" if free_seats is not None else ""
     kind = "тур з ночівлею" if tour.kind == "overnight" else "одноденний тур"
     return (
         f"<b>{tour.title}</b>\n\n"
@@ -162,7 +164,7 @@ def tour_text(tour: Tour) -> str:
         f"Формат: {kind}\n"
         f"💰 Дорослий: {tour.adult_price} грн\n"
         f"🧒 Дитячий: {tour.child_price} грн\n"
-        f"{prepay}{seats}\n\n"
+        f"{prepay}{seats}{free_text}\n\n"
         f"<b>У ціну входить:</b>\n{tour.included}\n\n"
         f"<b>Маршрут:</b>\n{tour.route}"
     )
@@ -170,6 +172,7 @@ def tour_text(tour: Tour) -> str:
 
 def booking_admin_text(booking_id: int, tour: Tour, data: dict) -> str:
     username = f"@{data['username']}" if data.get("username") else "без username"
+    people_count_text = f"\n👥 Кількість учасників: {data.get('people_count')}" if data.get('people_count') else ""
     return (
         f"Нова заявка #{booking_id}\n\n"
         f"Тур: {tour.title}\n"
@@ -410,14 +413,16 @@ async def tour_detail(callback: CallbackQuery) -> None:
     if not tour:
         await callback.answer("Тур не знайдено", show_alert=True)
         return
+    free_seats = await db.tour_free_seats(tour_id) if tour.seats_total else None
+    text = tour_text(tour, free_seats)
     if tour.photo_file_id:
         await callback.message.answer_photo(
             photo=tour.photo_file_id,
-            caption=tour_text(tour),
+            caption=text,
             reply_markup=tour_detail_keyboard(tour.id),
         )
     else:
-        await callback.message.answer(tour_text(tour), reply_markup=tour_detail_keyboard(tour.id))
+        await callback.message.answer(text, reply_markup=tour_detail_keyboard(tour.id))
     await callback.answer()
 
 
@@ -1169,10 +1174,17 @@ async def start_booking(callback: CallbackQuery, state: FSMContext) -> None:
     if not tour:
         await callback.answer("Тур не знайдено", show_alert=True)
         return
+    free_seats = await db.tour_free_seats(tour_id)
+    if tour.seats_total and free_seats == 0:
+        await callback.answer("У цьому турі більше немає вільних місць.", show_alert=True)
+        return
     await state.clear()
     await state.update_data(tour_id=tour_id)
     await state.set_state(BookingFlow.full_name)
-    await callback.message.answer("Введіть ваше ім'я та прізвище.")
+    await callback.message.answer(
+        "Введіть ваше ім'я та прізвище.\n\n"
+        f"Вільно місць: {free_seats}"
+    )
     await callback.answer()
 
 
@@ -1186,8 +1198,18 @@ async def booking_name(message: Message, state: FSMContext) -> None:
 @router.message(BookingFlow.phone)
 async def booking_phone(message: Message, state: FSMContext) -> None:
     await state.update_data(phone=message.text.strip())
+    data = await state.get_data()
+    tour_id = data.get("tour_id")
+    if tour_id:
+        free_seats = await db.tour_free_seats(tour_id)
+    else:
+        free_seats = 0
     await state.set_state(BookingFlow.people_count)
-    await message.answer("Скільки людей ви реєструєте? Введіть число.")
+    reply_markup = booking_count_keyboard(tour_id, free_seats) if tour_id else None
+    await message.answer(
+        "Скільки людей ви реєструєте? Виберіть кнопку або введіть число.",
+        reply_markup=reply_markup,
+    )
 
 
 @router.message(BookingFlow.people_count)
@@ -1195,9 +1217,16 @@ async def booking_people_count(message: Message, state: FSMContext) -> None:
     if not message.text.strip().isdigit() or int(message.text.strip()) < 1:
         await message.answer("Введіть число більше 0.")
         return
-    await state.update_data(people_count=int(message.text.strip()))
-    await state.set_state(BookingFlow.ages)
     count = int(message.text.strip())
+    data = await state.get_data()
+    tour_id = data.get("tour_id")
+    if tour_id:
+        free_seats = await db.tour_free_seats(tour_id)
+        if count > free_seats:
+            await message.answer(f"Можна забронювати не більше {free_seats} місць.")
+            return
+    await state.update_data(people_count=count)
+    await state.set_state(BookingFlow.ages)
     await message.answer(
         "Вкажіть ім'я та вік кожного учасника.\n"
         "Краще писати кожного з нового рядка.\n\n"
@@ -1207,6 +1236,39 @@ async def booking_people_count(message: Message, state: FSMContext) -> None:
         "Олексій - 40\n"
         "Михайло - 14"
     )
+
+
+@router.callback_query(F.data.startswith("booking_count:"))
+async def booking_count(callback: CallbackQuery, state: FSMContext) -> None:
+    _, tour_id_str, count_str = callback.data.split(":")
+    tour_id = int(tour_id_str)
+    count = int(count_str)
+    free_seats = await db.tour_free_seats(tour_id)
+    if count > free_seats:
+        await callback.answer(f"Можна забронювати не більше {free_seats} місць.", show_alert=True)
+        return
+    await state.update_data(people_count=count)
+    await state.set_state(BookingFlow.ages)
+    await callback.message.answer(
+        "Вкажіть ім'я та вік кожного учасника.\n"
+        "Краще писати кожного з нового рядка.\n\n"
+        f"Потрібно учасників: {count}\n"
+        "Наприклад:\n"
+        "Артем - 35\n"
+        "Олексій - 40\n"
+        "Михайло - 14"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking_count_custom:"))
+async def booking_count_custom(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(BookingFlow.people_count)
+    await callback.message.answer(
+        "Введіть потрібну кількість людей числом.\n"
+        "Пам'ятайте, що можна забронювати не більше доступних місць."
+    )
+    await callback.answer()
 
 
 @router.message(BookingFlow.ages)
@@ -1235,10 +1297,13 @@ async def booking_ages(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
 
     pay_url = tour.payment_url or config.mono_payment_url
+    people_count = data.get("people_count")
+    count_text = f"👥 Учасників: {people_count}\n\n" if people_count else ""
     text = (
         "✅ Вашу заявку успішно створено!\n\n"
         f"📍 Тур: {tour.title}\n"
         f"📅 Дата: {format_dt(tour.starts_at)}\n\n"
+        f"{count_text}"
         f"👨 Дорослий: {tour.adult_price} грн\n"
         f"🧒 Дитячий: {tour.child_price} грн\n\n"
         "💳 Для підтвердження участі внесіть передоплату.\n\n"

@@ -157,6 +157,34 @@ def admin_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def booking_count_keyboard(tour_id: int, free_seats: int) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    max_buttons = min(free_seats, 7)
+    row: list[InlineKeyboardButton] = []
+    for count in range(1, max_buttons + 1):
+        row.append(
+            InlineKeyboardButton(
+                text=str(count),
+                callback_data=f"booking_count:{tour_id}:{count}",
+            )
+        )
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    if free_seats > 7:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Інша кількість",
+                    callback_data=f"booking_count_custom:{tour_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="Назад до турів", callback_data="tours")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def camping_keyboard(
     free_tents: int,
     free_hammocks: int,
