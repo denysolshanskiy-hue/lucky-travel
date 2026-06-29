@@ -157,7 +157,11 @@ def admin_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def camping_keyboard(free_tents: int, free_hammocks: int) -> InlineKeyboardMarkup:
+def camping_keyboard(
+    free_tents: int,
+    free_hammocks: int,
+    show_date_change: bool = False,
+) -> InlineKeyboardMarkup:
     rows = []
     if free_tents > 0:
         rows.extend(
@@ -188,7 +192,16 @@ def camping_keyboard(free_tents: int, free_hammocks: int) -> InlineKeyboardMarku
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="Оновити залишки", callback_data="camping:refresh")])
+    if show_date_change:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔄 Обрати іншу дату", callback_data="camping:change_date"),
+                InlineKeyboardButton(text="Оновити залишки", callback_data="camping:refresh"),
+            ]
+        )
+    else:
+        rows.append([InlineKeyboardButton(text="Оновити залишки", callback_data="camping:refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -264,16 +264,29 @@ async def camping_free_numbers(item_type: str, booking_date: str | None = None) 
     return free_numbers
 
 
-async def send_camping(message: Message) -> None:
-    free_tents, free_hammocks = await camping_availability()
+async def send_camping(message: Message, booking_date: str | None = None) -> None:
+    if not booking_date:
+        text = (
+            "<b>Кемпінг</b>\n\n"
+            "Введіть дату бронювання у форматі:\n"
+            "15.07.2026\n\n"
+            "Після цього ви зможете обрати тип намету або гамаку для цієї дати."
+        )
+        await message.answer(text)
+        return
+
+    free_tents, free_hammocks = await camping_availability(booking_date)
     text = (
         "<b>Кемпінг</b>\n\n"
-        "Можна окремо забронювати місце для ночівлі.\n\n"
+        f"Дата бронювання: {format_booking_date(booking_date)}\n\n"
+        "Оберіть варіант:\n"
         f"Вільно звичайних наметів: {free_tents} з {TENT_TOTAL}\n"
-        f"Вільно наметів-гамаків: {free_hammocks} з {HAMMOCK_TOTAL}\n\n"
-        "Оберіть варіант:"
+        f"Вільно наметів-гамаків: {free_hammocks} з {HAMMOCK_TOTAL}\n"
     )
-    await message.answer(text, reply_markup=camping_keyboard(free_tents, free_hammocks))
+    await message.answer(
+        text,
+        reply_markup=camping_keyboard(free_tents, free_hammocks, show_date_change=True),
+    )
 
 
 def camping_admin_text(booking_id: int, data: dict) -> str:
@@ -539,6 +552,7 @@ async def packing_overnight_button(message: Message, state: FSMContext) -> None:
 @router.message(lambda message: message.text and "Кемпінг" in message.text)
 async def camping_button(message: Message, state: FSMContext) -> None:
     await state.clear()
+    await state.set_state(CampingFlow.booking_date)
     await send_camping(message)
 
 
@@ -607,7 +621,20 @@ async def booking_paid_callback(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "camping:refresh")
-async def camping_refresh(callback: CallbackQuery) -> None:
+async def camping_refresh(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    booking_date = data.get("booking_date")
+    if not booking_date:
+        await callback.answer("Спочатку введіть дату бронювання.", show_alert=True)
+        return
+    await send_camping(callback.message, booking_date)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "camping:change_date")
+async def camping_change_date(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(booking_date=None)
+    await state.set_state(CampingFlow.booking_date)
     await send_camping(callback.message)
     await callback.answer()
 
@@ -638,9 +665,13 @@ async def camping_clear_selection(callback: CallbackQuery, state: FSMContext) ->
 @router.callback_query(F.data.startswith("camping:"))
 async def camping_select(callback: CallbackQuery, state: FSMContext) -> None:
     option_code = callback.data.split(":")[1]
-    if option_code in {"refresh", "confirm", "clear"}:
-        if option_code == "refresh":
-            await send_camping(callback.message)
+    if option_code == "refresh":
+        data = await state.get_data()
+        booking_date = data.get("booking_date")
+        if not booking_date:
+            await callback.answer("Спочатку введіть дату бронювання.", show_alert=True)
+            return
+        await send_camping(callback.message, booking_date)
         await callback.answer()
         return
 
@@ -649,19 +680,34 @@ async def camping_select(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Варіант не знайдено.", show_alert=True)
         return
 
-    await state.clear()
+    data = await state.get_data()
+    booking_date = data.get("booking_date")
+    if not booking_date:
+        await callback.answer("Спочатку введіть дату бронювання.", show_alert=True)
+        return
+
     await state.update_data(
         option_code=option_code,
         option_title=option["title"],
         item_type=option["item_type"],
         units=option["units"],
     )
-    await state.set_state(CampingFlow.booking_date)
+    await state.set_state(CampingFlow.selecting_items)
 
+    free_numbers = await camping_free_numbers(option["item_type"], booking_date)
+    if not free_numbers:
+        await callback.answer("На цю дату цей тип уже зайнято. Оберіть інший варіант.", show_alert=True)
+        return
+
+    item_name = "намету" if option["item_type"] == "tent" else "намету-гамака"
     await callback.message.answer(
-        f"Обрано: {option['title']}\n\n"
-        "Введіть дату бронювання у форматі:\n"
-        "15.07.2026"
+        f"Обрано: {option['title']}\n"
+        f"Оберіть номер {item_name}:",
+        reply_markup=camping_numbers_keyboard(
+            option_code,
+            option["item_type"],
+            free_numbers,
+        ),
     )
     await callback.answer()
 
@@ -730,27 +776,17 @@ async def camping_booking_date(message: Message, state: FSMContext) -> None:
         )
         return
 
-    data = await state.get_data()
-    option_code = data.get("option_code")
-    item_type = data.get("item_type")
-    if not option_code or not item_type:
-        await state.clear()
-        await message.answer("Сесія бронювання завершилась. Почніть спочатку.")
-        return
-
     await state.update_data(booking_date=booking_date)
     await state.set_state(CampingFlow.selecting_items)
 
-    free_numbers = await camping_free_numbers(item_type, booking_date)
-    if not free_numbers:
-        await message.answer("На цю дату всі номери вже зайняті.")
+    free_tents, free_hammocks = await camping_availability(booking_date)
+    if free_tents == 0 and free_hammocks == 0:
+        await message.answer(
+            f"На {format_booking_date(booking_date)} всі намети зайняті. Спробуйте іншу дату."
+        )
         return
 
-    await message.answer(
-        f"Дата бронювання: {format_booking_date(booking_date)}\n\n"
-        "Оберіть один або кілька номерів:",
-        reply_markup=camping_numbers_keyboard(option_code, item_type, free_numbers),
-    )
+    await send_camping(message, booking_date)
 
 @router.message(CampingFlow.phone)
 async def camping_phone(message: Message, state: FSMContext, bot: Bot) -> None:
