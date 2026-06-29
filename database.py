@@ -180,10 +180,13 @@ class Database:
         ).eq("id", booking_id).execute()
         return len(response.data) > 0
 
-    async def camping_used_units(self) -> dict[str, int]:
-        response = self.client.table("camping_bookings").select(
+    async def camping_used_units(self, booking_date: str | None = None) -> dict[str, int]:
+        query = self.client.table("camping_bookings").select(
             "item_type, units"
-        ).eq("status", "booked").execute()
+        ).eq("status", "booked")
+        if booking_date:
+            query = query.eq("booking_date", booking_date)
+        response = query.execute()
 
         result: dict[str, int] = {}
         for row in response.data:
@@ -191,12 +194,15 @@ class Database:
             result[item_type] = result.get(item_type, 0) + row["units"]
         return result
 
-    async def camping_booked_numbers(self, item_type: str) -> set[int]:
-        response = self.client.table("camping_bookings").select(
+    async def camping_booked_numbers(self, item_type: str, booking_date: str | None = None) -> set[int]:
+        query = self.client.table("camping_bookings").select(
             "item_number"
         ).eq("status", "booked").eq(
             "item_type", item_type
-        ).gt("item_number", 0).execute()
+        ).gt("item_number", 0)
+        if booking_date:
+            query = query.eq("booking_date", booking_date)
+        response = query.execute()
 
         return {int(row["item_number"]) for row in response.data}
 

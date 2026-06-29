@@ -192,18 +192,30 @@ def camping_keyboard(free_tents: int, free_hammocks: int) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def camping_numbers_keyboard(option_code: str, item_type: str, free_numbers: list[int]) -> InlineKeyboardMarkup:
+def camping_numbers_keyboard(
+    option_code: str,
+    item_type: str,
+    free_numbers: list[int],
+    selected_numbers: list[int] | None = None,
+) -> InlineKeyboardMarkup:
     rows = []
+    selected_set = set(selected_numbers or [])
     for index in range(0, len(free_numbers), 3):
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"№{number}",
+                    text=(f"✅ №{number}" if number in selected_set else f"№{number}"),
                     callback_data=f"camping_number:{option_code}:{item_type}:{number}",
                 )
                 for number in free_numbers[index : index + 3]
             ]
         )
+    rows.append(
+        [
+            InlineKeyboardButton(text="✅ Підтвердити вибір", callback_data="camping:confirm"),
+            InlineKeyboardButton(text="🗑 Очистити", callback_data="camping:clear"),
+        ]
+    )
     rows.append([InlineKeyboardButton(text="Назад до кемпінгу", callback_data="camping:refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
